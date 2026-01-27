@@ -97,7 +97,7 @@ namespace GTAVToolsExample1
                 {
                     case true:
                         //Makes the players character balance and move their arms around in a windmill motion.
-                        me.character.SendNMMessage(NMMessage.BodyBalance);
+                        me.character.SendNMMessage(NMMessage.BodyBalance, true);
                         me.character.SendNMMessage(NMMessage.ArmsWindmill);
                         break;
                     case false:
@@ -137,6 +137,7 @@ namespace BetterBulletImpacts
         {
             Tick += OnTick;
             this.me = GTAV.player;
+            //All of the weapons that will make the blood spray bigger.
             powerfulweapons.Add(WeaponCache.WEAPON_MG);
             powerfulweapons.Add(WeaponCache.WEAPON_COMBATMG);
             powerfulweapons.Add(WeaponCache.WEAPON_COMBATMG_MK2);
@@ -169,6 +170,7 @@ namespace BetterBulletImpacts
         {
             if (!ptfx)
             {
+                //Loading the PTFX (Particle FX)
                 ptfx = true;
                 GTAV.RequestPTFXAsset("scr_fbi1");
                 GTAV.RequestPTFXAsset("core");
@@ -179,20 +181,28 @@ namespace BetterBulletImpacts
             {
                 if (me.IsTargettingEntity(ped.handle) && me.character.isshooting)
                 {
+                    //If the player is using a heavy weapon.
                     bool isusingheavyweapon = powerfulweapons.Contains((WeaponCache)me.character.currentweapon);
+                    //The peds last bone that was damaged.
                     int bone = ped.lastdamagebone;
+                    //If the ped was hit in a fatal bone.
                     bool didhitfatalbone = fatalbones.Contains(bone);
+                    //The players last bullet impact coordinates.
                     Vector3 bulletcoord = me.character.lastweaponhitcoord;
+                    //Some sort of weird method I used to get an offset.
                     Vector3 pos = Function.Call<Vector3>(GTAV.HexHashToNativeHash(0x2274BC1C4885E333), ped, bulletcoord.X, bulletcoord.Y, bulletcoord.Z);
+                    //Gets the BoneTransform for the last damaged bone.
                     BoneTransform bonetransform = ped.GetBoneTransformForBone(ped.GetBoneIndexFromBoneID(bone));
-                    Vector3 bonerot = Function.Call<Vector3>((Hash)0xCE6294A232D03786, ped.handle, ped.GetBoneIndexFromBoneID(bone));
+                    //The players look vector/forward vector.
                     Vector3 rot = me.character.forwardvector;
-                    Vector3 finalrot = rot - bonerot;
-                    Vector3 fuck = new Vector3(finalrot.Z, finalrot.X, finalrot.Y);
+                    //Calculating the correct rotation.
+                    Vector3 finalrot = rot - bonetransform.rot;
+                    Vector3 corrected = new Vector3(finalrot.Z, finalrot.X, finalrot.Y);
                     if (!isusingheavyweapon)
                     {
+                        //Starts PTFX for the blood spray.
                         GTAV.SetPTFXAssetForNextCall("scr_fbi1");
-                        GTAV.StartPTFXOnPedBone("scr_fbi1", "scr_fbi_autopsy_blood", ped, pos, fuck, ped.GetBoneIndexFromBoneID(bone), 0.3f, false);
+                        GTAV.StartPTFXOnPedBone("scr_fbi1", "scr_fbi_autopsy_blood", ped, pos, corrected, ped.GetBoneIndexFromBoneID(bone), 0.3f, false);
                         GTAV.SetPTFXAssetForNextCall("core");
                         GTAV.StartPTFXOnPedBone("core", "blood_stab", ped, ped.GetBoneIndexFromBoneID(bone), 1f, false);
                     }
@@ -200,19 +210,22 @@ namespace BetterBulletImpacts
                     {
                         if (!didhitfatalbone)
                         {
+                            //Starts PTFX for the blood spray, bigger than using a non-heavy weapon.
                             GTAV.SetPTFXAssetForNextCall("scr_fbi1");
-                            GTAV.StartPTFXOnPedBone("scr_fbi1", "scr_fbi_autopsy_blood", ped, pos, fuck, ped.GetBoneIndexFromBoneID(bone), 0.37f, false);
+                            GTAV.StartPTFXOnPedBone("scr_fbi1", "scr_fbi_autopsy_blood", ped, pos, corrected, ped.GetBoneIndexFromBoneID(bone), 0.37f, false);
                             GTAV.SetPTFXAssetForNextCall("core");
                             GTAV.StartPTFXOnPedBone("core", "blood_stab", ped, ped.GetBoneIndexFromBoneID(bone), 1f, false);
                         }
                         else if (didhitfatalbone)
                         {
+                            //Starts PTFX for the blood spray, bigger than using a non-heavy weapon on a non-fatal bone.
                             GTAV.SetPTFXAssetForNextCall("scr_fbi1");
-                            GTAV.StartPTFXOnPedBone("scr_fbi1", "scr_fbi_autopsy_blood", ped, pos, fuck, ped.GetBoneIndexFromBoneID(bone), 0.46f, false);
+                            GTAV.StartPTFXOnPedBone("scr_fbi1", "scr_fbi_autopsy_blood", ped, pos, corrected, ped.GetBoneIndexFromBoneID(bone), 0.46f, false);
                             GTAV.SetPTFXAssetForNextCall("core");
                             GTAV.StartPTFXOnPedBone("core", "blood_stab", ped, ped.GetBoneIndexFromBoneID(bone), 1f, false);
                         }
                     }
+                    //Preventing spam.
                     Script.Wait(200);
                 }
             }
