@@ -10,4 +10,5 @@ Thats it! Now you can use scripts using .NET scripts that require GTAVTools.
 
 # How to use within your scripts
 ## Referencing the DLL
+**Please make Copy Local on the DLL properties to false to prevent replacing the GTAVTools dll.**
 ![Referencing the DLL](reference.gif)
