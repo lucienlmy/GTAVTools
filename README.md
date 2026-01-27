@@ -68,11 +68,6 @@ GTAVPickup pickup = new GTAVPickup(PickupCache.PICKUP_WEAPON_PISTOL, spawnpoint)
 ### Basic player ragdoller
 ```csharp
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using GTA.Math;
 using GTAVTools;
 using GTA;
 
@@ -95,12 +90,12 @@ namespace GTAVToolsExample1
             {
                 switch (me.character.isragdoll)
                 {
-                    case true:
+                    case false:
                         //Makes the players character balance and move their arms around in a windmill motion.
                         me.character.SendNMMessage(NMMessage.BodyBalance, true);
                         me.character.SendNMMessage(NMMessage.ArmsWindmill);
                         break;
-                    case false:
+                    case true:
                         //Unragdolls the players character.
                         me.character.Unragdoll();
                         break;
@@ -112,16 +107,12 @@ namespace GTAVToolsExample1
 ```
 ### Better bullet impacts (one of my mods)
 ```csharp
+using System;
+using System.Collections.Generic;
 using GTA;
 using GTA.Math;
 using GTA.Native;
 using GTAVTools;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace BetterBulletImpacts
 {
@@ -233,4 +224,106 @@ namespace BetterBulletImpacts
     }
 }
 ```
+### Mobile radio
+```csharp
+using System;
+using GTAVTools;
+using GTA;
+using GTA.Native;
+
+namespace MobileRadio
+{
+    public class MobileRadio : Script
+    {
+
+        public bool on = false;
+
+        public MobileRadio()
+        {
+            Tick += OnTick;
+        }
+
+        public void OnTick(object sender, EventArgs e)
+        {
+            //Checking if the player is just pressed Context (normally E on keyboard)
+            if (GTAV.GetCtrlUtilization(ControlPriority.Frontend, ControlUtilization.JustPressed, GTA.Control.Context) && GTAV.player.character.isusingmobilephone)
+            {
+                //Toggling the "on" value.
+                on = !on;
+                //The soundset used for the "toggle noise"
+                string soundset = "Phone_Soundset_Default";
+                GTAVPlayer plr = GTAV.player;
+                //Making the players finger touch a button on their cellphone.
+                Function.Call(GTAV.HexHashToNativeHashU(0x95C9E72F3D7DEC9B), 5);
+                //Changing the soundset for the main 3 protagonists phones.
+                if (plr.cellphone == Cellphone.iFruit)
+                {
+                    soundset = "Phone_Soundset_Michael";
+                }
+                else if (plr.cellphone == Cellphone.Badger)
+                {
+                    soundset = "Phone_Soundset_Franklin";
+                }
+                else if (plr.cellphone == Cellphone.Facade)
+                {
+                    soundset = "Phone_Soundset_Trevor";
+                }
+                //Playing the "toggle noise"
+                GTAV.PlaySoundFrontend("Menu_Accept", soundset);
+                //Toggling the audio flag for the mobile radio.
+                Function.Call(GTAV.HexHashToNativeHashU(0xB9EFD5C25018725A), "MobileRadioInGame", on);
+                //Toggling the mobile radio actually being active.
+                Function.Call(GTAV.HexHashToNativeHashU(0xBF286C554784F3DF), on);
+            }
+        }
+    }
+}
+```
+### GTA IV Style Pushing
+```csharp
+using System;
+using System.Collections.Generic;
+using GTA;
+using GTAVTools;
+
+namespace IVPushing
+{
+    public class IVPushing : Script
+    {
+
+        public List<uint> pushed = new List<uint>();
+
+        public IVPushing()
+        {
+            Tick += OnTick;
+        }
+
+        public void OnTick(object sender, EventArgs e)
+        {
+            //Getting every ped.
+            List<GTAVPed> peds = GTAV.GetAllGTAVPeds();
+            foreach (GTAVPed ped in peds)
+            {
+                //Making sure all requirements are met:
+                // -- This ped is not the player
+                // -- The player is touching the ped
+                // -- The ped is not ragdolled
+                // -- The ped is human
+                if (ped.handle != GTAV.player.character.handle && GTAV.player.character.IsTouchingEntity(ped.handle) && !ped.isragdoll && ped.ishuman)
+                {
+                    //Making the ped balance, swing their arms around in a windmill motion and makes them try to grab things.
+                    ped.SendNMMessage(NMMessage.BodyBalance, true, 2000);
+                    ped.SendNMMessage(NMMessage.ArmsWindmill);
+                    ped.SendNMMessage(NMMessage.Grab);
+                    //If the "pushed" list does not contain this ped already.
+                    if (!pushed.Contains(ped.handle))
+                    {
+                        //Adds this ped to the "pushed" list.
+                        pushed.Add(ped.handle);
+                    }
+                }
+            }
+        }
+    }
+}
 ```
