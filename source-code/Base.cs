@@ -9,10 +9,56 @@ using System.Drawing;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Windows.Forms.VisualStyles;
 using Ctrl = GTA.Control;
 
 namespace GTAVTools
 {
+    #region Internals
+    /// <summary>
+    /// A unique memory patcher.
+    /// </summary>
+    public class MemoryPatch
+    {
+        public IntPtr address;
+        public int byteslength;
+        public byte[] newbytes;
+        byte[] oldbytes;
+
+        public MemoryPatch(IntPtr address, int byteslength, byte[] newbytes)
+        {
+            this.address = address;
+            this.byteslength = byteslength;
+            this.newbytes = newbytes;
+            this.oldbytes = new byte[this.byteslength];
+        }
+
+        public void Patch()
+        {
+            Marshal.Copy(this.address, this.oldbytes, 0, this.byteslength);
+            Marshal.Copy(this.newbytes, 0, this.address, this.byteslength);
+        }
+
+        public void Revert()
+        {
+            Marshal.Copy(this.oldbytes, 0, this.address, this.byteslength);
+        }
+    }
+
+    /// <summary>
+    /// An internal identifier for an entities memory address.
+    /// </summary>
+    internal class InternalMemIdentifier
+    {
+        internal IntPtr address;
+        internal GTAVEntity entity;
+
+        internal InternalMemIdentifier(IntPtr address, GTAVEntity entity)
+        {
+            this.address = address;
+            this.entity = entity;
+        }
+    }
 
     public enum NMMessage
     {
@@ -390,7 +436,9 @@ namespace GTAVTools
             this.b = b;
         }
     }
+    #endregion
 
+    #region Players
     public class GTAVPlayer
     {
         /// <summary>
@@ -791,7 +839,9 @@ namespace GTAVTools
             }
         }
     }
+    #endregion
 
+    #region Pickups
     public class GTAVPickup
     {
         /// <summary>
@@ -807,13 +857,47 @@ namespace GTAVTools
             handle = Function.Call<uint>(GTAV.HexHashToNativeHashU(0xFBA08C503DD5FA58), GTAV.GenHashKey(pickup.ToString()), pos.X, pos.Y, pos.Z, 1, 1, false, 0);
         }
     }
+    #endregion
 
+    #region Props
     public class GTAVProp
     {
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate ulong GSCED(uint handle);
+
+        /// <summary>
+        /// If this props memory address has been found.
+        /// </summary>
+        internal bool hasmemaddr = false;
+
         /// <summary>
         /// The handle of this prop.
         /// </summary>
         public uint handle { get; }
+
+        private static IntPtr scea;
+        private static GSCED gse;
+
+        /// <summary>
+        /// This props memory address.
+        /// </summary>
+        public unsafe IntPtr memaddress
+        {
+            get
+            {
+                if (!hasmemaddr)
+                {
+                    GetMemoryAddress();
+                }
+                if (gse == null)
+                {
+                    return IntPtr.Zero;
+                }
+                ulong ptr = gse(this.handle);
+                return new IntPtr((long)ptr);
+            }
+        }
 
         /// <summary>
         /// This props current position.
@@ -937,6 +1021,34 @@ namespace GTAVTools
             this.handle = handle;
         }
 
+        /// <summary>
+        /// Does all the stuff to get this vehicles memory address
+        /// </summary>
+        internal unsafe void GetMemoryAddress()
+        {
+            bool existsindb = false;
+            foreach (InternalMemIdentifier imi in GTAV.memidentifiers)
+            {
+                if (imi.entity.handle == handle)
+                {
+                    existsindb = true;
+                }
+            }
+            if (!existsindb)
+            {
+                IntPtr address = GTAV.FindPattern("\x85\xED\x74\x0F\x8B\xCD\xE8\x00\x00\x00\x00\x48\x8B\xF8\x48\x85\xC0\x74\x2E", "xxxxxxx????xxxxxxxx");
+                if (address == IntPtr.Zero)
+                {
+                    throw new AccessViolationException("Memory pattern not found or the memory is protected.");
+                }
+                int rel = Marshal.ReadInt32(address + 7);
+                IntPtr fnptr = address + 11 + rel;
+                gse = Marshal.GetDelegateForFunctionPointer<GSCED>(fnptr);
+                this.hasmemaddr = true;
+                GTAV.memidentifiers.Add(new InternalMemIdentifier(this.memaddress, this));
+            }
+        }
+
         //support for using GTAVProp as a GTAVEntity
         public static implicit operator GTAVEntity(GTAVProp ped)
         {
@@ -990,14 +1102,47 @@ namespace GTAVTools
             Function.Call(GTAV.HexHashToNativeHash(0x6B9BBD38AB0796DF), this.handle, entity.handle, bone, position.X, position.Y, position.Z, rotation.X, rotation.Y, rotation.Z, false, false, false, false, 2, true);
         }
     }
+#endregion
 
+    #region Vehicles
     public class GTAVVehicle
     {
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate ulong GSCED(uint handle);
+
+        /// <summary>
+        /// If this vehicles memory address has been found.
+        /// </summary>
+        internal bool hasmemaddr = false;
 
         /// <summary>
         /// The handle of this vehicle.
         /// </summary>
         public uint handle { get; }
+
+        private static IntPtr scea;
+        private static GSCED gse;
+
+        /// <summary>
+        /// This vehicles memory address
+        /// </summary>
+        public unsafe IntPtr memaddress
+        {
+            get
+            {
+                if (!hasmemaddr)
+                {
+                    GetMemoryAddress();
+                }
+                if (gse == null)
+                {
+                    return IntPtr.Zero;
+                }
+                ulong ptr = gse(this.handle);
+                return new IntPtr((long)ptr);
+            }
+        }
 
         /// <summary>
         /// This vehicles current position.
@@ -1305,6 +1450,62 @@ namespace GTAVTools
         }
 
         /// <summary>
+        /// If this vehicle can be visibly damaged / deformed.
+        /// </summary>
+        public bool canbevisiblydamaged
+        {
+            set
+            {
+                Function.Call(GTAV.HexHashToNativeHash(0x4C7028F78FFD3681), this.handle, value);
+            }
+        }
+
+        /// <summary>
+        /// If this vehicles wheels can break (if they can fall off and get stuck).
+        /// </summary>
+        public bool canwheelsbreak
+        {
+            set
+            {
+                Function.Call(GTAV.HexHashToNativeHash(0x29B18B4FD460CA8F), this.handle, value);
+            }
+        }
+
+        /// <summary>
+        /// If this vehicles is invincible.
+        /// </summary>
+        public bool isinvincible
+        {
+            set
+            {
+                Function.Call(GTAV.HexHashToNativeHash(0x3882114BDE571AD4), this.handle, true, false);
+            }
+        }
+
+        /// <summary>
+        /// The amount of dirt this vehicle has, max value is 15.0.
+        /// </summary>
+        public float dirtlevel
+        {
+            get
+            {
+                return Function.Call<float>(GTAV.HexHashToNativeHashU(0x8F17BC8BA08DA62B), this.handle);
+            }
+            set
+            {
+                if (value > 15.0f)
+                {
+                    value = 15.0f;
+                }
+                if (value < 0f)
+                {
+                    value = 0f;
+                }
+                Function.Call(GTAV.HexHashToNativeHash(0x79D3B596FE44EE8B), this.handle, value);
+            }
+        }
+
+        /// <summary>
         /// A vehicle.
         /// </summary>
         public GTAVVehicle(GTAVModel model, Vector3 pos, float heading)
@@ -1319,6 +1520,34 @@ namespace GTAVTools
         public GTAVVehicle(uint handle)
         {
             this.handle = handle;
+        }
+
+        /// <summary>
+        /// Does all the stuff to get this vehicles memory address
+        /// </summary>
+        internal unsafe void GetMemoryAddress()
+        {
+            bool existsindb = false;
+            foreach (InternalMemIdentifier imi in GTAV.memidentifiers)
+            {
+                if (imi.entity.handle == handle)
+                {
+                    existsindb = true;
+                }
+            }
+            if (!existsindb)
+            {
+                IntPtr address = GTAV.FindPattern("\x85\xED\x74\x0F\x8B\xCD\xE8\x00\x00\x00\x00\x48\x8B\xF8\x48\x85\xC0\x74\x2E", "xxxxxxx????xxxxxxxx");
+                if (address == IntPtr.Zero)
+                {
+                    throw new AccessViolationException("Memory pattern not found or the memory is protected.");
+                }
+                int rel = Marshal.ReadInt32(address + 7);
+                IntPtr fnptr = address + 11 + rel;
+                gse = Marshal.GetDelegateForFunctionPointer<GSCED>(fnptr);
+                this.hasmemaddr = true;
+                GTAV.memidentifiers.Add(new InternalMemIdentifier(this.memaddress, this));
+            }
         }
 
         //support for using GTAVVehicle as an InputArgument for native calls
@@ -1364,6 +1593,15 @@ namespace GTAVTools
         {
             uint handle = this.handle;
             Function.Call(GTAV.HexHashToNativeHash(0x629BFA74418D6239), &handle);
+        }
+
+        /// <summary>
+        /// Repairs this vehicle.
+        /// </summary>
+        public void Repair()
+        {
+            Function.Call(GTAV.HexHashToNativeHash(0x45F6D8EEF34ABEF1), this.handle, 1000);
+            Function.Call(GTAV.HexHashToNativeHash(0x115722B1B9C14C1C), this.handle);
         }
 
         /// <summary>
@@ -1553,15 +1791,45 @@ namespace GTAVTools
         {
             Function.Call(GTAV.HexHashToNativeHash(0x2497C4717C8B881E), this.handle, on, instantly, disableautostart);
         }
-    }
 
+        /// <summary>
+        /// Deforms the vehicles mesh and collision at the specified offset from the vehicle models origin, damage is the intensity of the deformation, radius is the range in which the vehicles model will be deformed at the offset.
+        /// </summary>
+        public void DeformAt(Vector3 offset, float damage, float radius)
+        {
+            Function.Call(GTAV.HexHashToNativeHashU(0xA1DD317EA8FD4F29), this.handle, offset.X, offset.Y, offset.Z, damage, radius, false);
+        }
+
+        /// <summary>
+        /// Deforms the vehicles mesh and collision at the specified offset from the vehicle models origin, damage is the intensity of the deformation, radius is the range in which the vehicles model will be deformed at the offset, focus controls whether it makes sure the point actually fits with the vehicles mesh, so even if it isnt on the vehicles mesh it will still go to the closest position to it.
+        /// </summary>
+        public void DeformAt(Vector3 offset, float damage, float radius, bool focus)
+        {
+            Function.Call(GTAV.HexHashToNativeHashU(0xA1DD317EA8FD4F29), this.handle, offset.X, offset.Y, offset.Z, damage, radius, focus);
+        }
+    }
+    #endregion
+
+    #region Pedestrians
     public class GTAVPed
     {
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate ulong GSCED(uint handle);
+
+        /// <summary>
+        /// If this peds memory address has been found.
+        /// </summary>
+        internal bool hasmemaddr = false;
 
         /// <summary>
         /// The handle of this ped.
         /// </summary>
         public uint handle { get; }
+
+        private static IntPtr scea;
+        private static GSCED gse;
+
 
         /// <summary>
         /// The global player handle.
@@ -1596,6 +1864,26 @@ namespace GTAVTools
             set
             {
                 Function.Call(GTAV.HexHashToNativeHashU(0xB128377056A54E2A), this.handle, value);
+            }
+        }
+
+        /// <summary>
+        /// This peds memory address
+        /// </summary>
+        public unsafe IntPtr memaddress
+        {
+            get
+            {
+                if (!hasmemaddr)
+                {
+                    GetMemoryAddress();
+                }
+                if (gse == null)
+                {
+                    return IntPtr.Zero;
+                }
+                ulong ptr = gse(this.handle);
+                return new IntPtr((long)ptr);
             }
         }
 
@@ -1724,9 +2012,9 @@ namespace GTAVTools
         /// <summary>
         /// The vehicle this ped is currently in.
         /// </summary>
-        public uint currentvehicle
+        public GTAVVehicle currentvehicle
         {
-            get => Function.Call<uint>(GTAV.HexHashToNativeHashU(0x6094AD011A2EA87D), this.handle);
+            get => new GTAVVehicle(Function.Call<uint>(GTAV.HexHashToNativeHashU(0x6094AD011A2EA87D), this.handle));
         }
 
         /// <summary>
@@ -2268,6 +2556,34 @@ namespace GTAVTools
             tasks = new GTAVTaskHandler(handle, this);
         }
 
+        /// <summary>
+        /// Does all the stuff to get this peds memory address
+        /// </summary>
+        internal unsafe void GetMemoryAddress()
+        {
+            bool existsindb = false;
+            foreach (InternalMemIdentifier imi in GTAV.memidentifiers)
+            {
+                if (imi.entity.handle == handle)
+                {
+                    existsindb = true;
+                }
+            }
+            if (!existsindb)
+            {
+                IntPtr address = GTAV.FindPattern("\x85\xED\x74\x0F\x8B\xCD\xE8\x00\x00\x00\x00\x48\x8B\xF8\x48\x85\xC0\x74\x2E", "xxxxxxx????xxxxxxxx");
+                if (address == IntPtr.Zero)
+                {
+                    throw new AccessViolationException("Memory pattern not found or the memory is protected.");
+                }
+                int rel = Marshal.ReadInt32(address + 7);
+                IntPtr fnptr = address + 11 + rel;
+                gse = Marshal.GetDelegateForFunctionPointer<GSCED>(fnptr);
+                this.hasmemaddr = true;
+                GTAV.memidentifiers.Add(new InternalMemIdentifier(this.memaddress, this));
+            }
+        }
+
         //support for using GTAVPed as an InputArgument for native calls
         public static implicit operator InputArgument(GTAVPed ped)
         {
@@ -2381,6 +2697,15 @@ namespace GTAVTools
         }
 
         /// <summary>
+        /// Sends the NaturalMotion message to this ped.
+        /// </summary>
+        public void SendNMMessage(int message)
+        {
+            Function.Call(GTAV.HexHashToNativeHash(0x418EF2A1BCE56685), true, (int)message);
+            Function.Call(GTAV.HexHashToNativeHashU(0xB158DFCCC56E5C5B), this.handle);
+        }
+
+        /// <summary>
         /// Sends the NaturalMotion message to this ped and can auto-ragdoll them.
         /// </summary>
         public void SendNMMessage(NMMessage message, bool autoragdoll)
@@ -2394,9 +2719,35 @@ namespace GTAVTools
         }
 
         /// <summary>
+        /// Sends the NaturalMotion message to this ped and can auto-ragdoll them.
+        /// </summary>
+        public void SendNMMessage(int message, bool autoragdoll)
+        {
+            if (autoragdoll)
+            {
+                Function.Call(GTAV.HexHashToNativeHashU(0xAE99FB955581844A), this.handle, 0, -1, 1, true, true, false);
+            }
+            Function.Call(GTAV.HexHashToNativeHash(0x418EF2A1BCE56685), true, (int)message);
+            Function.Call(GTAV.HexHashToNativeHashU(0xB158DFCCC56E5C5B), this.handle);
+        }
+
+        /// <summary>
         /// Sends the NaturalMotion message to this ped, can auto-ragdoll them and can ragdoll them for a specific duration of time (in ms).
         /// </summary>
         public void SendNMMessage(NMMessage message, bool autoragdoll, int duration)
+        {
+            if (autoragdoll)
+            {
+                Function.Call(GTAV.HexHashToNativeHashU(0xAE99FB955581844A), this.handle, 0, duration, 1, true, true, false);
+            }
+            Function.Call(GTAV.HexHashToNativeHash(0x418EF2A1BCE56685), true, (int)message);
+            Function.Call(GTAV.HexHashToNativeHashU(0xB158DFCCC56E5C5B), this.handle);
+        }
+
+        /// <summary>
+        /// Sends the NaturalMotion message to this ped, can auto-ragdoll them and can ragdoll them for a specific duration of time (in ms).
+        /// </summary>
+        public void SendNMMessage(int message, bool autoragdoll, int duration)
         {
             if (autoragdoll)
             {
@@ -2480,7 +2831,9 @@ namespace GTAVTools
             return Function.Call<Vector3>(GTAV.HexHashToNativeHash(0x17C07FC640E86B4E), this.handle, index, offset.X, offset.Y, offset.Y);
         }
     }
+    #endregion
 
+    #region Tasks
     public class GTAVTaskHandler
     {
         public uint handle { get; }
@@ -2541,17 +2894,25 @@ namespace GTAVTools
         }
 
         /// <summary>
-        /// Makes the ped fight against the set enemy (ped handle).
+        /// Makes the ped fight against the set enemy.
         /// </summary>
-        public void TaskFightAgainst(uint enemyhandle)
+        public void TaskFightAgainst(GTAVPed enemy)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0xF166E48407BAC484), this.handle, enemyhandle, 0, 16);
+            Function.Call(GTAV.HexHashToNativeHashU(0xF166E48407BAC484), this.handle, enemy.handle, 0, 16);
         }
 
         /// <summary>
-        /// Makes the ped put their hands up for a set period of time (in ms) and makes them face another ped (via handle) aslong as they are still in the timeframe where they can face them (in ms).
+        /// Makes the ped warp into the specified vehicle.
         /// </summary>
-        public void TaskHandsUp(int duration, uint facing, int timetofaceped)
+        public void TaskWarpIntoVehicle(GTAVVehicle vehicle, Seat seat)
+        {
+            Function.Call(GTAV.HexHashToNativeHashU(0x9A7D091411C5F684), this.handle, vehicle.handle, (int)seat);
+        }
+
+        /// <summary>
+        /// Makes the ped put their hands up for a set period of time (in ms) and makes them face another ped aslong as they are still in the timeframe where they can face them (in ms).
+        /// </summary>
+        public void TaskHandsUp(int duration, GTAVPed facing, int timetofaceped)
         {
             Function.Call(GTAV.HexHashToNativeHashU(0xF2EAB31979A7F910), this.handle, duration, facing, timetofaceped, 0);
         }
@@ -2591,49 +2952,49 @@ namespace GTAVTools
         /// <summary>
         /// Makes the ped open a vehicle door (from vehicle handle) aslong as the seat exists, the timeout threshold hasn't exceeded (I think speed is how fast they go to the door?).
         /// </summary>
-        public void TaskOpenVehicleDoor(GTAVVehicle vehiclehandle, int timeout, Seat seat, float speed)
+        public void TaskOpenVehicleDoor(GTAVVehicle vehicle, int timeout, Seat seat, float speed)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0x965791A9A488A062), this.handle, vehiclehandle, timeout, (int)seat, speed);
+            Function.Call(GTAV.HexHashToNativeHashU(0x965791A9A488A062), this.handle, vehicle.handle, timeout, (int)seat, speed);
         }
 
         /// <summary>
         /// Makes the ped enter a vehicle.
         /// </summary>
-        public void TaskEnterVehicle(GTAVVehicle vehiclehandle)
+        public void TaskEnterVehicle(GTAVVehicle vehicle)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0x965791A9A488A062), this.handle, vehiclehandle, -1, -1, 1.0f, 0, 0);
+            Function.Call(GTAV.HexHashToNativeHashU(0x965791A9A488A062), this.handle, vehicle.handle, -1, -1, 1.0f, 0, 0);
         }
 
         /// <summary>
         /// Makes the ped enter a vehicle aslong as the timeout threshold isn't met and the seat exists.
         /// </summary>
-        public void TaskEnterVehicle(GTAVVehicle vehiclehandle, int timeout, Seat seat, int speed)
+        public void TaskEnterVehicle(GTAVVehicle vehicle, int timeout, Seat seat, int speed)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0x965791A9A488A062), this.handle, vehiclehandle, timeout, (int)seat, speed, 0, 0);
+            Function.Call(GTAV.HexHashToNativeHashU(0x965791A9A488A062), this.handle, vehicle.handle, timeout, (int)seat, speed, 0, 0);
         }
 
         /// <summary>
         /// Makes the ped leave the vehicle they are currently in.
         /// </summary>
-        public void TaskLeaveVehicle(GTAVVehicle vehiclehandle)
+        public void TaskLeaveVehicle(GTAVVehicle vehicle)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0xD3DBCE61A490BE02), this.handle, vehiclehandle, 0);
+            Function.Call(GTAV.HexHashToNativeHashU(0xD3DBCE61A490BE02), this.handle, vehicle.handle, 0);
         }
 
         /// <summary>
         /// Makes the ped leave the vehicle they are currently in with the given flags.
         /// </summary>
-        public void TaskLeaveVehicle(GTAVVehicle vehiclehandle, LeaveVehicleFlags flags)
+        public void TaskLeaveVehicle(GTAVVehicle vehicle, LeaveVehicleFlags flags)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0xD3DBCE61A490BE02), this.handle, vehiclehandle, (int)flags);
+            Function.Call(GTAV.HexHashToNativeHashU(0xD3DBCE61A490BE02), this.handle, vehicle.handle, (int)flags);
         }
 
         /// <summary>
         /// Makes the ped get off the boat they are currently on.
         /// </summary>
-        public void TaskGetOffBoat(GTAVVehicle vehiclehandle)
+        public void TaskGetOffBoat(GTAVVehicle boat)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0x9C00E77AF14B2DFF), this.handle, vehiclehandle);
+            Function.Call(GTAV.HexHashToNativeHashU(0x9C00E77AF14B2DFF), this.handle, boat);
         }
 
         /// <summary>
@@ -2673,8 +3034,10 @@ namespace GTAVTools
         /// </summary>
         public void TaskDriveToCoord(Vector3 coords, float speed)
         {
-            uint vehicle = Function.Call<uint>(GTAV.HexHashToNativeHashU(0x6094AD011A2EA87D), this.handle);
-            Function.Call(GTAV.HexHashToNativeHashU(0x158BB33F920D360C), this.handle, vehicle, coords.X, coords.Y, coords.Z, speed, 0, 0);
+            if (thisped.currentvehicle.handle != 0)
+            {
+                Function.Call(GTAV.HexHashToNativeHashU(0x158BB33F920D360C), this.handle, thisped.currentvehicle.handle, coords.X, coords.Y, coords.Z, speed, 0, 0);
+            }
         }
 
         /// <summary>
@@ -2682,8 +3045,10 @@ namespace GTAVTools
         /// </summary>
         public void TaskDriveWander(float speed, int drivingstyle)
         {
-            uint vehicle = Function.Call<uint>(GTAV.HexHashToNativeHashU(0x6094AD011A2EA87D), this.handle);
-            Function.Call(GTAV.HexHashToNativeHashU(0x158BB33F920D360C), this.handle, vehicle, speed, drivingstyle);
+            if (thisped.currentvehicle.handle != 0)
+            {
+                Function.Call(GTAV.HexHashToNativeHashU(0x158BB33F920D360C), this.handle, thisped.currentvehicle.handle, speed, drivingstyle);
+            }
         }
 
         /// <summary>
@@ -2747,7 +3112,10 @@ namespace GTAVTools
         /// </summary>
         public void TaskVehiclePark(Vector3 coords, float heading)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0x0F3E34E968EA374E), this.handle, thisped.currentvehicle, coords.X, coords.Y, coords.Z, heading, 0, 5f, false);
+            if (thisped.currentvehicle.handle != 0)
+            {
+                Function.Call(GTAV.HexHashToNativeHashU(0x0F3E34E968EA374E), this.handle, thisped.currentvehicle.handle, coords.X, coords.Y, coords.Z, heading, 0, 5f, false);
+            }
         }
 
         /// <summary>
@@ -2755,7 +3123,10 @@ namespace GTAVTools
         /// </summary>
         public void TaskVehiclePark(Vector3 coords, float heading, ParkMode mode, float radius, bool keepengineon)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0x0F3E34E968EA374E), this.handle, thisped.currentvehicle, coords.X, coords.Y, coords.Z, heading, (int)mode, radius, keepengineon);
+            if (thisped.currentvehicle.handle != 0)
+            {
+                Function.Call(GTAV.HexHashToNativeHashU(0x0F3E34E968EA374E), this.handle, thisped.currentvehicle.handle, coords.X, coords.Y, coords.Z, heading, (int)mode, radius, keepengineon);
+            }
         }
 
         /// <summary>
@@ -2785,16 +3156,16 @@ namespace GTAVTools
             }
             else if (thisped.isinvehicle)
             {
-                Function.Call(GTAV.HexHashToNativeHashU(0x5BC448CB78FA3E88), this.handle, coords.X, coords.Y, coords.Z, 1, thisped.currentvehicle, true, 0, 10);
+                Function.Call(GTAV.HexHashToNativeHashU(0x5BC448CB78FA3E88), this.handle, coords.X, coords.Y, coords.Z, 1, thisped.currentvehicle.handle, true, 0, 10);
             }
         }
 
         /// <summary>
         /// Makes the ped go to the set coordinates by any means necessary
         /// </summary>
-        public void TaskGoToCoordAnyMeans(Vector3 coords, float moveblendratio, GTAVVehicle vehiclehandle, bool uselongrangevehiclepathing, int drivingflags, float maxrangetoshoottargets)
+        public void TaskGoToCoordAnyMeans(Vector3 coords, float moveblendratio, GTAVVehicle vehicle, bool uselongrangevehiclepathing, int drivingflags, float maxrangetoshoottargets)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0x5BC448CB78FA3E88), this.handle, coords.X, coords.Y, coords.Z, moveblendratio, vehiclehandle, uselongrangevehiclepathing, drivingflags, maxrangetoshoottargets);
+            Function.Call(GTAV.HexHashToNativeHashU(0x5BC448CB78FA3E88), this.handle, coords.X, coords.Y, coords.Z, moveblendratio, vehicle, uselongrangevehiclepathing, drivingflags, maxrangetoshoottargets);
         }
 
         /// <summary>
@@ -2846,11 +3217,11 @@ namespace GTAVTools
         }
 
         /// <summary>
-        /// Makes the ped look at the given entity (entity handle) aslong as priority is high enough, duration (in ms) is long enough and the flags are valid.
+        /// Makes the ped look at the given entity aslong as priority is high enough, duration (in ms) is long enough and the flags are valid.
         /// </summary>
-        public void TaskLookAtEntity(uint entityhandle, int duration, LookAtFlags flags, int priority)
+        public void TaskLookAtEntity(GTAVEntity entity, int duration, LookAtFlags flags, int priority)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0x69F4BE8C8CC4796C), this.handle, entityhandle, duration, (int)flags, priority);
+            Function.Call(GTAV.HexHashToNativeHashU(0x69F4BE8C8CC4796C), this.handle, entity, duration, (int)flags, priority);
         }
 
         /// <summary>
@@ -2862,19 +3233,19 @@ namespace GTAVTools
         }
 
         /// <summary>
-        /// Makes the ped aim their gun at the given entity (entity handle) until the time they have been aiming has exceeded duration (in ms).
+        /// Makes the ped aim their gun at the given entity until the time they have been aiming has exceeded duration (in ms).
         /// </summary>
-        public void TaskAimGunAtEntity(uint entityhandle, int duration, bool instantblendtoaim)
+        public void TaskAimGunAtEntity(GTAVEntity entity, int duration, bool instantblendtoaim)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0x9B53BB6E8943AF53), this.handle, entityhandle, duration, instantblendtoaim);
+            Function.Call(GTAV.HexHashToNativeHashU(0x9B53BB6E8943AF53), this.handle, entity, duration, instantblendtoaim);
         }
 
         /// <summary>
-        /// Makes the ped turn to face the given entity (entity handle) until the time they have been facing the entity has exceeded duration (in ms).
+        /// Makes the ped turn to face the given entity until the time they have been facing the entity has exceeded duration (in ms).
         /// </summary>
-        public void TaskTurnToFaceEntity(uint entityhandle, int duration)
+        public void TaskTurnToFaceEntity(GTAVEntity entity, int duration)
         {
-            Function.Call(GTAV.HexHashToNativeHashU(0x5AD23D40115353AC), this.handle, entityhandle, duration);
+            Function.Call(GTAV.HexHashToNativeHashU(0x5AD23D40115353AC), this.handle, entity, duration);
         }
 
         /// <summary>
@@ -2894,46 +3265,46 @@ namespace GTAVTools
         }
 
         /// <summary>
-        /// Makes the shuffle to the next vehicle seat (aslong as they are actually in a vehicle).
+        /// Makes the ped shuffle to the next vehicle seat (aslong as they are actually in a vehicle).
         /// </summary>
         public void TaskShuffleToNextVehicleSeat(bool usealternateshuffle)
         {
             if (thisped.isinvehicle)
             {
-                Function.Call(GTAV.HexHashToNativeHashU(0x7AA80209BDA643EB), this.handle, thisped.currentvehicle, usealternateshuffle);
+                Function.Call(GTAV.HexHashToNativeHashU(0x7AA80209BDA643EB), this.handle, thisped.currentvehicle.handle, usealternateshuffle);
             }
         }
 
         /// <summary>
         /// Makes the ped escort the target vehicle (vehicle handle) with the given arguments (I can't think of any good documentation for this, the value names should give you a good idea though).
         /// </summary>
-        public void TaskEscortVehicle(uint targetvehiclehandle, VehicleEscortMode escortmode, DrivingStyle drivingstyle, float mindistance, int minheightaboveterrain, float noroadsdistance)
+        public void TaskEscortVehicle(GTAVVehicle targetvehicle, VehicleEscortMode escortmode, DrivingStyle drivingstyle, float mindistance, int minheightaboveterrain, float noroadsdistance)
         {
             if (thisped.isinvehicle)
             {
-                Function.Call(GTAV.HexHashToNativeHashU(0x0FA6E4B75F302400), this.handle, thisped.currentvehicle, targetvehiclehandle, (int)escortmode, (int)drivingstyle, mindistance, minheightaboveterrain, noroadsdistance);
+                Function.Call(GTAV.HexHashToNativeHashU(0x0FA6E4B75F302400), this.handle, thisped.currentvehicle.handle, targetvehicle.handle, (int)escortmode, (int)drivingstyle, mindistance, minheightaboveterrain, noroadsdistance);
             }
         }
 
         /// <summary>
         /// Makes the ped follow the target entity (entity handle) in a vehicle with the set speed, drivingstyle, and minimum distance (the minimum amount of distance the ped can be from the target entity).
         /// </summary>
-        public void TaskFollowEntityInVehicle(uint targetentityhandle, float speed, DrivingStyle drivingstyle, int mindistance)
+        public void TaskFollowEntityInVehicle(GTAVEntity targetentity, float speed, DrivingStyle drivingstyle, int mindistance)
         {
             if (thisped.isinvehicle)
             {
-                Function.Call(GTAV.HexHashToNativeHashU(0xFC545A9F0626E3B6), this.handle, thisped.currentvehicle, targetentityhandle, speed, (int)drivingstyle, mindistance);
+                Function.Call(GTAV.HexHashToNativeHashU(0xFC545A9F0626E3B6), this.handle, thisped.currentvehicle, targetentity, speed, (int)drivingstyle, mindistance);
             }
         }
 
         /// <summary>
         /// Makes the ped chase the given entity (entity handle) in their vehicle.
         /// </summary>
-        public void TaskChaseEntityInVehicle(uint targetentityhandle)
+        public void TaskChaseEntityInVehicle(GTAVEntity targetentity)
         {
             if (thisped.isinvehicle)
             {
-                Function.Call(GTAV.HexHashToNativeHashU(0x3C08A8E30363B353), this.handle, targetentityhandle);
+                Function.Call(GTAV.HexHashToNativeHashU(0x3C08A8E30363B353), this.handle, targetentity);
             }
         }
 
@@ -2986,7 +3357,9 @@ namespace GTAVTools
         }
 
     }
+    #endregion
 
+    #region Models
     /// <summary>
     /// A model.
     /// </summary>
@@ -3034,7 +3407,9 @@ namespace GTAVTools
             return mdl.hash;
         }
     }
+    #endregion
 
+    #region Entities
     /// <summary>
     /// An entity. (not recommended for normal use, used internally for some functions, if a function requires one of these you can pass stuff like GTAVPed instead of GTAVEntity and it will still work)
     /// </summary>
@@ -3118,11 +3493,14 @@ namespace GTAVTools
             return ent.handle;
         }
     }
+    #endregion
 
+    #region Core
     public class GTAV : Script
     {
 
         private static GTAVPlayer internalplayer = new GTAVPlayer();
+        internal static List<InternalMemIdentifier> memidentifiers = new List<InternalMemIdentifier>();
 
         /// <summary>
         /// The player.
@@ -3136,9 +3514,14 @@ namespace GTAVTools
         }
 
         /// <summary>
-        /// The budget for peds for functions like GTAV.GetAllGTAVPeds and GTAV.GetNearbyGTAVPeds (to reduce the performance hit)
+        /// The budget for peds for functions like GTAV.GetAllGTAVPeds, GTAV.GetNearbyGTAVPeds and GTAV.GetNearestGTAVPed (to reduce the performance hit)
         /// </summary>
-        public static int gvtpedbudget = 1024;
+        public static int gvtpedbudget = 2048;
+        /// <summary>
+        /// The budget for vehicles for functions like GTAV.GetAllGTAVVehicles, GTAV.GetNearbyGTAVVehicles and GTAV.GetNearestGTAVVehicle (to reduce the performance hit)
+        /// </summary>
+        public static int gvtvehbudget = 2048;
+
         public static bool init = false;
 
         /// <summary>
@@ -3291,6 +3674,28 @@ namespace GTAVTools
         }
 
         /// <summary>
+        /// Runs SHVDN's World.GetNearbyPeds and then converts them all into a GTAVPed and returns the list.
+        /// </summary>
+        public static List<GTAVPed> GetNearbyGTAVPeds(Vector3 pos, float radius)
+        {
+            List<GTAVPed> fuck = new List<GTAVPed>();
+            Ped[] shvdnpeds = World.GetNearbyPeds(pos, radius);
+            foreach (Ped shvdnped in shvdnpeds)
+            {
+                if (fuck.Count >= gvtpedbudget)
+                {
+                    break;
+                }
+                if (shvdnped.Exists())
+                {
+                    fuck.Add(new GTAVPed((uint)shvdnped.Handle));
+                }
+            }
+            fuck.TrimExcess();
+            return fuck;
+        }
+
+        /// <summary>
         /// Runs SHVDN's World.GetClosestPed and then converts the ped to a GTAVPed, if no ped is found it will return null
         /// </summary>
         public static GTAVPed GetNearestGTAVPed(Vector3 pos, float radius)
@@ -3299,6 +3704,85 @@ namespace GTAVTools
             if (shvdnped != null)
             {
                 return new GTAVPed((uint)shvdnped.Handle);
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Runs SHVDN's World.GetAllVehicles and then converts all the vehicles into a GTAVVehicle and returns the list.
+        /// </summary>
+        public static List<GTAVVehicle> GetAllGTAVVehicles()
+        {
+            List<GTAVVehicle> fuck = new List<GTAVVehicle>();
+            Vehicle[] shvdnvehs = World.GetAllVehicles();
+            foreach (Vehicle shvdnveh in shvdnvehs)
+            {
+                if (fuck.Count >= gvtpedbudget)
+                {
+                    break;
+                }
+                if (shvdnveh.Exists())
+                {
+                    fuck.Add(new GTAVVehicle((uint)shvdnveh.Handle));
+                }
+            }
+            fuck.TrimExcess();
+            return fuck;
+        }
+
+        /// <summary>
+        /// Runs SHVDN's World.GetNearbyVehicles and then converts all of the vehicles into a GTAVVehicle and returns the list.
+        /// </summary>
+        public static List<GTAVVehicle> GetNearbyGTAVVehicles(GTAVEntity entity, float radius)
+        {
+            List<GTAVVehicle> fuck = new List<GTAVVehicle>();
+            Vehicle[] shvdnvehs = World.GetNearbyVehicles(entity, radius);
+            foreach (Vehicle shvdnveh in shvdnvehs)
+            {
+                if (fuck.Count >= gvtpedbudget)
+                {
+                    break;
+                }
+                if (shvdnveh.Exists())
+                {
+                    fuck.Add(new GTAVVehicle((uint)shvdnveh.Handle));
+                }
+            }
+            fuck.TrimExcess();
+            return fuck;
+        }
+
+        /// <summary>
+        /// Runs SHVDN's World.GetNearbyVehicles and then converts all of the vehicles into a GTAVVehicle and returns the list.
+        /// </summary>
+        public static List<GTAVVehicle> GetNearbyGTAVVehicles(Vector3 pos, float radius)
+        {
+            List<GTAVVehicle> fuck = new List<GTAVVehicle>();
+            Vehicle[] shvdnvehs = World.GetNearbyVehicles(pos, radius);
+            foreach (Vehicle shvdnveh in shvdnvehs)
+            {
+                if (fuck.Count >= gvtpedbudget)
+                {
+                    break;
+                }
+                if (shvdnveh.Exists())
+                {
+                    fuck.Add(new GTAVVehicle((uint)shvdnveh.Handle));
+                }
+            }
+            fuck.TrimExcess();
+            return fuck;
+        }
+
+        /// <summary>
+        /// Runs SHVDN's World.GetClosestVehicle and then converts the vehicle to a GTAVVehicle, if no ped is found it will return null
+        /// </summary>
+        public static GTAVVehicle GetNearestGTAVVehicle(Vector3 pos, float radius)
+        {
+            Vehicle shvdnveh = World.GetClosestVehicle(pos, radius);
+            if (shvdnveh != null)
+            {
+                return new GTAVVehicle((uint)shvdnveh.Handle);
             }
             return null;
         }
@@ -3600,5 +4084,21 @@ namespace GTAVTools
         {
             return Function.Call<int>(GTAV.HexHashToNativeHash(0x430386FE9BF80B45));
         }
+
+        /// <summary>
+        /// Creates a new memory patcher, once created it will immediately patch, to revert a patch use the Revert() function on the patch.
+        /// </summary>
+        public static MemoryPatch CreateNewMemoryPatch(IntPtr address, byte[] newbytes)
+        {
+            try
+            {
+                return new MemoryPatch(address, newbytes.Length, newbytes);
+            }
+            catch
+            {
+                throw new Exception("Illegal creation of MemoryPatch, the memory might be protected, corrupted or non-existent.");
+            }
+        }
     }
+    #endregion
 }
