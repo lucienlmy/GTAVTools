@@ -88,6 +88,43 @@ IntPtr pattern = GTAV.FindPattern("pattern123", "patternmask123");  //"pattern12
 IntPtr memaddr = [ENTITY].memaddress
 ```
 
+## Script Configs
+**The config files already have to be existing in the scripts folder, if they don't this wont work**
+### Reading a list of values [uses reading weapon hashes as an example]
+```csharp
+List<WeaponCache> guns = new List<WeaponCache>();
+string scriptsfolder = AppContext.BaseDirectory;
+string configlocation = Path.Combine(scriptsfolder, "MyScriptConfig.ini");
+foreach (string weapon in GTAV.ReadCategoryOfINIFile(configlocation, "guns"))
+{
+    WeaponCache cached;
+    bool parsed = Enum.TryParse<WeaponCache>(weapon, out cached);
+    if (parsed)
+    {
+        guns.Add(cached);
+    }
+}
+```
+### Reading a list of bools [uses making the player invincible as an example]
+```csharp
+string scriptsfolder = AppContext.BaseDirectory;
+string configlocation = Path.Combine(scriptsfolder, "MyScriptConfig.ini");
+List<INIBool> cheats = GTAV.ReadBoolCategoryOfINIFile(configlocation, "cheats");
+if (cheats[0].value)
+{
+    GTAV.player.character.isinvincible = true;
+}
+```
+### With all the config stuff above, your .ini file should look something like this
+```
+[Guns]
+WEAPON_PISTOL
+WEAPON_APPISTOL
+
+[Cheats]
+Godmode = true
+```
+
 ## Code examples
 **More code examples will be coming soon*
 ### Basic player ragdoller
